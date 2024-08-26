@@ -1,13 +1,25 @@
-import http from 'http';
+import express from 'express';
 import { parse } from 'url';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 const PORT = process.env.PORT || 3000;
 
+const app = express();
+
+// Get the __dirname equivalent for ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files from the 'public' folder
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Function to generate HTML with Pinterest pins
 const generateHTML = (pins) => {
     let html = `
     <!DOCTYPE html>
@@ -17,6 +29,7 @@ const generateHTML = (pins) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>PRE SHUFFLED PINS</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="/styles.css"> <!-- Link to your external CSS file -->
     </head>
     <body>
         <h1>Pinterest Pins</h1>
@@ -24,7 +37,6 @@ const generateHTML = (pins) => {
     `;
 
     pins.forEach(pin => {
-        // Accessing the URL for a specific image size (e.g., 600x)
         const imageUrl = pin.media.images['600x'].url; 
         html += `<div class="pin">
                     <img src="${imageUrl}" alt="${pin.alt_text || 'Pin Image'}" class="grid-image" pin-url="${pin.link}" board-name="${pin.board_owner.username}">
@@ -84,90 +96,79 @@ const generateHTML = (pins) => {
     return html;
 };
 
+// Route to display a welcome message
+app.get('/', (req, res) => {
+    res.send('Welcome to the Pinterest API example. Go to /boards to list boards or /pins?boardId=427560627062867576 to fetch pins.');
+});
 
-const server = http.createServer(async (req, res) => {
-    const parsedUrl = parse(req.url, true);
-    const pathname = parsedUrl.pathname;
+// Route to fetch boards
+app.get('/boards', async (req, res) => {
+    if (!ACCESS_TOKEN) {
+        res.status(401).send('Unauthorized. Access token is missing.');
+        return;
+    }
 
-    console.log(`Incoming request: ${pathname}`);
+    try {
+        const boardsUrl = `https://api.pinterest.com/v5/boards`;
+        const response = await fetch(boardsUrl, {
+            headers: {
+                'Authorization': `Bearer ${ACCESS_TOKEN}`,
+            },
+        });
 
-    if (pathname === '/') {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('Welcome to the Pinterest API example. Go to /boards to list boards or /pins?boardId=427560627062867576 to fetch pins.');
-    } else if (pathname === '/boards') {
-        if (!ACCESS_TOKEN) {
-            res.writeHead(401, { 'Content-Type': 'text/html' });
-            res.end('Unauthorized. Access token is missing.');
-            return;
+        const data = await response.json();
+
+        if (response.ok) {
+            res.json(data);
+        } else {
+            res.status(response.status).json(data);
         }
-
-        try {
-            const boardsUrl = `https://api.pinterest.com/v5/boards`;
-            const response = await fetch(boardsUrl, {
-                headers: {
-                    'Authorization': `Bearer ${ACCESS_TOKEN}`,
-                },
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(data, null, 2));
-            } else {
-                res.writeHead(response.status, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(data, null, 2));
-            }
-        } catch (error) {
-            console.error('Error fetching boards:', error);
-            res.writeHead(500, { 'Content-Type': 'text/html' });
-            res.end('Internal Server Error');
-        }
-    } else if (pathname === '/pins') {
-        if (!ACCESS_TOKEN) {
-            res.writeHead(401, { 'Content-Type': 'text/html' });
-            res.end('Unauthorized. Please authorize the app first.');
-            return;
-        }
-
-        const boardId = parsedUrl.query.boardId;
-
-        if (!boardId) {
-            res.writeHead(400, { 'Content-Type': 'text/html' });
-            res.end('Board ID is required.');
-            return;
-        }
-
-        try {
-            const pinsUrl = `https://api.pinterest.com/v5/boards/${boardId}/pins`;
-            const response = await fetch(pinsUrl, {
-                headers: {
-                    'Authorization': `Bearer ${ACCESS_TOKEN}`,
-                },
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                const pinsHtml = generateHTML(data.items);
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(pinsHtml);
-            } else {
-                res.writeHead(response.status, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(data, null, 2));
-            }
-        } catch (error) {
-            console.error('Error fetching pins:', error);
-            res.writeHead(500, { 'Content-Type': 'text/html' });
-            res.end('Internal Server Error');
-        }
-    } else {
-        res.writeHead(404, { 'Content-Type': 'text/html' });
-        res.end('Not Found');
+    } catch (error) {
+        console.error('Error fetching boards:', error);
+        res.status(500).send('Internal Server Error');
     }
 });
 
-server.listen(PORT, () => {
+// Route to fetch pins
+app.get('/pins', async (req, res) => {
+    if (!ACCESS_TOKEN) {
+        res.status(401).send('Unauthorized. Please authorize the app first.');
+        return;
+    }
+
+    const boardId = req.query.boardId;
+    console.log('Board ID:', boardId); // Debugging: Log board ID
+
+    if (!boardId) {
+        res.status(400).send('Board ID is required.');
+        return;
+    }
+
+    try {
+        const pinsUrl = `https://api.pinterest.com/v5/boards/${boardId}/pins`;
+        const response = await fetch(pinsUrl, {
+            headers: {
+                'Authorization': `Bearer ${ACCESS_TOKEN}`,
+            },
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            const pinsHtml = generateHTML(data.items);
+            res.send(pinsHtml);
+        } else {
+            console.error(`Error fetching pins: ${response.statusText}`);
+            res.status(response.status).json(data);
+        }
+    } catch (error) {
+        console.error('Error fetching pins:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// Start the server
+app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`Go to http://localhost:${PORT}/ to start`);
 });

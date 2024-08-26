@@ -2,15 +2,14 @@
   "name": "pinterest-oauth",
   "version": "1.0.0",
   "description": "",
-  "main": "app.js",
   "type": "module",
+  "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
     "dotenv": "^10.0.0",
-    "express": "^4.17.1",
+    "express": "^4.19.2",
     "node-fetch": "^2.6.1"
   }
 }
-
